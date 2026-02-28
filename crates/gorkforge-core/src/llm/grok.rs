@@ -38,6 +38,7 @@ pub struct GrokClient {
     api_key: String,
     client: Client,
     model: String,
+    max_retries: u8,
 }
 
 impl GrokClient {
@@ -45,15 +46,23 @@ impl GrokClient {
         let timeout = std::env::var("GORKFORGE_LLM_TIMEOUT_SECONDS")
             .ok()
             .and_then(|value| value.parse::<u64>().ok())
-            .unwrap_or(30);
+            .unwrap_or(120);
+
+        let max_retries = std::env::var("GORKFORGE_LLM_MAX_RETRIES")
+            .ok()
+            .and_then(|value| value.parse::<u8>().ok())
+            .unwrap_or(3);
+
+        let request_timeout = Duration::from_secs(timeout);
 
         Self {
             api_key,
             client: Client::builder()
-                .timeout(Duration::from_secs(timeout))
+                .timeout(request_timeout)
                 .build()
                 .unwrap_or_else(|_| Client::new()),
             model,
+            max_retries,
         }
     }
 
@@ -106,7 +115,7 @@ impl GrokClient {
         };
 
         let mut last_err = None;
-        for attempt in 1..=3u8 {
+        for attempt in 1..=self.max_retries {
             let response = self
                 .client
                 .post("https://api.x.ai/v1/chat/completions")
@@ -175,7 +184,9 @@ impl GrokClient {
                         format!("{}", err)
                     };
 
-                    if (attempt < 3) && (err.is_timeout() || err.is_connect()) {
+                    if (attempt < self.max_retries)
+                        && (err.is_timeout() || err.is_connect() || err.is_request())
+                    {
                         last_err = Some(anyhow!(detail));
                         sleep(Duration::from_millis(250 * u64::from(attempt))).await;
                         continue;

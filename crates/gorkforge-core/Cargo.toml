@@ -14,3 +14,5 @@ tokio = { workspace = true }
 reqwest = { workspace = true }
 tempfile = { workspace = true }
 dotenvy = { workspace = true }
+tree-sitter = { workspace = true }
+tree-sitter-rust = { workspace = true }
