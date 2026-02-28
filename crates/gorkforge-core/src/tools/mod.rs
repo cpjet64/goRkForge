@@ -310,7 +310,7 @@ impl ToolSet {
         std::fs::write(&target, replacement)?;
         self.sandbox
             .log(&format!("edit_file {}", target.display()))?;
-        self.run_cargo_checks("edit_file")?;
+        self.run_cargo_checks("edit_file", true)?;
         self.auto_commit_and_push("edit_file")?;
 
         Ok(format!("edited {}", rel))
@@ -346,7 +346,7 @@ impl ToolSet {
         std::fs::write(&target, content)?;
         self.sandbox
             .log(&format!("write_file {}", target.display()))?;
-        self.run_cargo_checks("write_file")?;
+        self.run_cargo_checks("write_file", true)?;
         self.auto_commit_and_push("write_file")?;
         Ok(format!("wrote {}", rel))
     }
@@ -427,20 +427,25 @@ impl ToolSet {
     }
 
     fn run_cargo(&self, _ctx: &TaskContext) -> Result<String> {
-        self.run_cargo_checks("run_cargo")
+        self.run_cargo_checks("run_cargo", false)
     }
 
-    fn run_cargo_checks(&self, reason: &str) -> Result<String> {
-        let steps = [
-            vec!["fmt", "--check"],
-            vec!["clippy", "--", "-D", "warnings"],
-            vec!["test"],
-            vec!["build"],
-        ];
-
-        for args in &steps {
-            self.run_cargo_step(args)?;
+    fn run_cargo_checks(&self, reason: &str, auto_fix_format: bool) -> Result<String> {
+        if auto_fix_format {
+            if let Err(err) = self.run_cargo_step(&["fmt", "--check"]) {
+                self.sandbox.log(&format!(
+                    "cargo fmt check failed during {}: {}",
+                    reason, err
+                ))?;
+                self.run_cargo_step(&["fmt"])?;
+            }
+        } else {
+            self.run_cargo_step(&["fmt", "--check"])?;
         }
+
+        self.run_cargo_step(&["clippy", "--", "-D", "warnings"])?;
+        self.run_cargo_step(&["test"])?;
+        self.run_cargo_step(&["build"])?;
 
         Ok(format!("run_cargo ok: {}", reason))
     }
