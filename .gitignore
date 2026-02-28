@@ -1,5 +1,6 @@
 /target
 .gorkforge
 .env
+gorkforge.config.toml
 Cargo.lock
 .DS_Store

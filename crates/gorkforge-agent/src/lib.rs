@@ -1,3 +1,22 @@
+use async_trait::async_trait;
+use gorkforge_core::{Agent, TaskContext, TaskResult, TaskStatus};
+
+pub struct CoreAgent;
+
+#[async_trait]
+impl Agent for CoreAgent {
+    fn name(&self) -> &'static str {
+        "gorkforge-agent"
+    }
+
+    async fn run(&self, context: &TaskContext) -> anyhow::Result<TaskResult> {
+        Ok(TaskResult {
+            status: TaskStatus::Completed,
+            output: format!("agent stub for task: {}", context.task),
+        })
+    }
+}
+
 pub fn stub() {
-    println!("Stub for {} (will be implemented in Phase 2+)", env!("CARGO_PKG_NAME"));
+    println!("stub for {}", env!("CARGO_PKG_NAME"));
 }

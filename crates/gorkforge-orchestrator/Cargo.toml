@@ -2,3 +2,9 @@
 name = "gorkforge-orchestrator"
 version = "0.1.0"
 edition = "2021"
+
+[dependencies]
+gorkforge-core = { path = "../gorkforge-core" }
+async-trait = { workspace = true }
+anyhow = { workspace = true }
+
