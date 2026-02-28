@@ -1,3 +1,4 @@
+use std::error::Error;
 use std::time::Duration;
 
 use anyhow::{anyhow, Context, Result};
@@ -41,10 +42,15 @@ pub struct GrokClient {
 
 impl GrokClient {
     pub fn new(api_key: String, model: String) -> Self {
+        let timeout = std::env::var("GORKFORGE_LLM_TIMEOUT_SECONDS")
+            .ok()
+            .and_then(|value| value.parse::<u64>().ok())
+            .unwrap_or(30);
+
         Self {
             api_key,
             client: Client::builder()
-                .timeout(Duration::from_secs(10))
+                .timeout(Duration::from_secs(timeout))
                 .build()
                 .unwrap_or_else(|_| Client::new()),
             model,
@@ -163,11 +169,19 @@ impl GrokClient {
                     return Ok(turn);
                 }
                 Err(err) => {
-                    last_err = Some(anyhow!(err));
-                    if attempt < 3 {
-                        sleep(Duration::from_millis(200 * u64::from(attempt))).await;
+                    let detail = if let Some(source) = err.source() {
+                        format!("{} | source: {}", err, source)
+                    } else {
+                        format!("{}", err)
+                    };
+
+                    if (attempt < 3) && (err.is_timeout() || err.is_connect()) {
+                        last_err = Some(anyhow!(detail));
+                        sleep(Duration::from_millis(250 * u64::from(attempt))).await;
                         continue;
                     }
+
+                    return Err(anyhow!("failed to send request: {}", detail));
                 }
             }
         }
