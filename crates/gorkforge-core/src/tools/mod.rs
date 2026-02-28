@@ -97,6 +97,31 @@ impl PolicyConfig {
     }
 }
 
+#[derive(Clone, Copy)]
+enum GatesMode {
+    Fast,
+    Full,
+}
+
+impl GatesMode {
+    fn from_env(default_fast: bool) -> Self {
+        match std::env::var("GORKFORGE_GATES_MODE")
+            .ok()
+            .map(|v| v.to_ascii_lowercase())
+            .as_deref()
+        {
+            Some("full") | Some("strict") => Self::Full,
+            Some("fast") => Self::Fast,
+            _ if default_fast => Self::Fast,
+            _ => Self::Full,
+        }
+    }
+
+    fn is_full(self) -> bool {
+        matches!(self, Self::Full)
+    }
+}
+
 #[derive(Clone)]
 pub struct ToolSet {
     pub sandbox: Sandbox,
@@ -389,7 +414,7 @@ impl ToolSet {
         std::fs::write(&target, replacement)?;
         self.sandbox
             .log(&format!("edit_file {}", target.display()))?;
-        self.run_cargo_checks("edit_file", true)?;
+        self.run_cargo_checks("edit_file", true, GatesMode::from_env(true))?;
         self.auto_commit_and_push("edit_file")?;
 
         Ok(format!("edited {}", rel))
@@ -425,7 +450,7 @@ impl ToolSet {
         std::fs::write(&target, content)?;
         self.sandbox
             .log(&format!("write_file {}", target.display()))?;
-        self.run_cargo_checks("write_file", true)?;
+        self.run_cargo_checks("write_file", true, GatesMode::from_env(true))?;
         self.auto_commit_and_push("write_file")?;
         Ok(format!("wrote {}", rel))
     }
@@ -505,11 +530,22 @@ impl ToolSet {
         run_command_allowlist(&self.sandbox.overlay_root, command)
     }
 
-    fn run_cargo(&self, _ctx: &TaskContext) -> Result<String> {
-        self.run_cargo_checks("run_cargo", false)
+    fn run_cargo(&self, ctx: &TaskContext) -> Result<String> {
+        let context_task = ctx.task.to_ascii_lowercase();
+        let mode = GatesMode::from_env(
+            context_task.contains("self-improve")
+                || context_task.contains("self improve")
+                || context_task.contains("self_improve"),
+        );
+        self.run_cargo_checks("run_cargo", false, mode)
     }
 
-    fn run_cargo_checks(&self, reason: &str, auto_fix_format: bool) -> Result<String> {
+    fn run_cargo_checks(
+        &self,
+        reason: &str,
+        auto_fix_format: bool,
+        gates_mode: GatesMode,
+    ) -> Result<String> {
         if auto_fix_format {
             if let Err(err) = self.run_cargo_step(&["fmt", "--check"]) {
                 self.sandbox.log(&format!(
@@ -520,6 +556,11 @@ impl ToolSet {
             }
         } else {
             self.run_cargo_step(&["fmt", "--check"])?;
+        }
+
+        if !gates_mode.is_full() {
+            self.run_cargo_step(&["check"])?;
+            return Ok(format!("run_cargo ok: {}", reason));
         }
 
         self.run_cargo_step(&["clippy", "--", "-D", "warnings"])?;

@@ -35,6 +35,16 @@ impl ReActReasoner {
             || task_flags.contains("tree-sitter")
             || task_flags.contains("parse_rust_file");
 
+        let tool_specs = self
+            .toolset
+            .tool_specs()
+            .into_iter()
+            .map(|(name, description, parameters)| ToolDefinition {
+                name,
+                description,
+                parameters,
+            })
+            .collect::<Vec<_>>();
         let system_prompt = self.system_prompt(context);
         let mut messages = vec![LlmMessage {
             role: "user".to_string(),
@@ -45,20 +55,9 @@ impl ReActReasoner {
         let mut last_tool_error = None::<String>;
 
         for iter in 0..self.max_iter {
-            let specs = self
-                .toolset
-                .tool_specs()
-                .into_iter()
-                .map(|(name, description, parameters)| ToolDefinition {
-                    name,
-                    description,
-                    parameters,
-                })
-                .collect::<Vec<_>>();
-
             let turn = self
                 .client
-                .complete(&system_prompt, &messages, &specs)
+                .complete(&system_prompt, &messages, &tool_specs)
                 .await
                 .context("llm request")?;
 
@@ -243,7 +242,8 @@ impl ReActReasoner {
             prompt.push_str(&format!("Max iterations for this run: {}\n", task_iter));
         }
 
-        if let Ok(extra) = collect_code_context(".") {
+        let full_context = std::env::var("GORKFORGE_CONTEXT_FULL").is_ok_and(|v| v == "YES");
+        if let Ok(extra) = collect_code_context(".", full_context) {
             prompt.push_str("\nCode context:\n");
             prompt.push_str(&extra);
         }
@@ -257,25 +257,29 @@ impl ReActReasoner {
     }
 }
 
-fn collect_code_context(root: &str) -> Result<String> {
-    let snapshot_paths = vec![
-        "Cargo.toml",
+fn collect_code_context(root: &str, include_full: bool) -> Result<String> {
+    let mut snapshot_paths = vec![
         "special.md",
-        ".gorkforge/policy.toml",
+        "Cargo.toml",
         "gorkforge.config.toml",
-        "crates/gorkforge-cli/src/main.rs",
-        "crates/gorkforge-cli/Cargo.toml",
-        "crates/gorkforge-core/Cargo.toml",
-        "crates/gorkforge-core/src/lib.rs",
-        "crates/gorkforge-core/src/config.rs",
-        "crates/gorkforge-core/src/llm.rs",
-        "crates/gorkforge-core/src/llm/grok.rs",
-        "crates/gorkforge-core/src/agent/mod.rs",
         "crates/gorkforge-core/src/agent/reasoner.rs",
-        "crates/gorkforge-core/src/platform.rs",
-        "crates/gorkforge-core/src/sandbox.rs",
         "crates/gorkforge-core/src/tools/mod.rs",
+        "crates/gorkforge-core/src/config.rs",
+        "crates/gorkforge-core/src/llm/grok.rs",
     ];
+
+    if include_full {
+        snapshot_paths.extend([
+            ".gorkforge/policy.toml",
+            "crates/gorkforge-core/Cargo.toml",
+            "crates/gorkforge-core/src/llm/grok.rs",
+            "crates/gorkforge-core/src/agent/mod.rs",
+            "crates/gorkforge-core/src/agent/reasoner.rs",
+            "crates/gorkforge-core/src/platform.rs",
+            "crates/gorkforge-core/src/sandbox.rs",
+            "crates/gorkforge-core/src/tools/mod.rs",
+        ]);
+    }
 
     let mut out = String::new();
     let root = Path::new(root);
