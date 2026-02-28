@@ -1,7 +1,9 @@
 pub mod agent;
+pub mod config;
 pub mod platform;
 
 pub use agent::{Agent, MockLlm, MockLlmConfig, Orchestrator, TaskContext, TaskResult, TaskStatus};
+pub use config::Config;
 pub use platform::Platform;
 
 #[derive(Clone, Debug)]

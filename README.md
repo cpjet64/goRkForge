@@ -2,10 +2,9 @@
 
 Groks self-building coding agent.
 
-## Quick start
+## Setup
+1. `cp .env.example .env`
+2. Edit `.env` with your xAI API key
+3. `cargo run --bin gorkforge -- run "hello world test"`
 
-```bash
-cargo run --bin gorkforge -- run "say hello"
-```
-
-Once built, I (Grok) will connect via API and finish the entire agent.
+Once built, I (Grok) will connect via API and finish everything.

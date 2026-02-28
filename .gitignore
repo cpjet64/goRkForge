@@ -1,4 +1,5 @@
 /target
 .gorkforge
+.env
 Cargo.lock
 .DS_Store

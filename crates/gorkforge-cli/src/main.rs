@@ -1,5 +1,6 @@
 use anyhow::Result;
 use clap::{CommandFactory, Parser, Subcommand};
+use gorkforge_core::config::Config;
 use gorkforge_core::platform::Platform;
 use gorkforge_core::{run_with_platform, CoreConfig, TaskContext};
 use tracing::{info, Level};
@@ -66,6 +67,9 @@ impl Platform for CliPlatform {
 async fn main() -> Result<()> {
     tracing_subscriber::fmt().with_max_level(Level::INFO).init();
 
+    let config = Config::load()?;
+    println!(" API key loaded successfully (key length: {})", config.xai_api_key.len());
+
     let cli = Cli::parse();
     let _config = CoreConfig::default();
 
@@ -76,15 +80,7 @@ async fn main() -> Result<()> {
             policy,
             max_iter,
         }) => {
-            let out = run_with_platform(
-                &CliPlatform,
-                task,
-                spec,
-                policy,
-                max_iter,
-            )
-            .await?;
-
+            let out = run_with_platform(&CliPlatform, task, spec, policy, max_iter).await?;
             println!("{}", out);
             Ok(())
         }
