@@ -211,14 +211,68 @@ impl ToolSet {
                 serde_json::json!({"type":"object","properties":{},"additionalProperties":false}),
             ),
             (
+                "open_pull_request".to_string(),
+                "Create a GitHub pull request for the current branch using gh. Requires PUSH_APPROVED=YES. If this fails, fall back to shell_safe with manual gh command if needed. Args: {title, body?, base?, head?, draft?, labels?, issue_numbers?}.".to_string(),
+                serde_json::json!({
+                    "type":"object",
+                    "properties":{
+                        "title":{"type":"string"},
+                        "body":{"type":"string"},
+                        "base":{"type":"string"},
+                        "head":{"type":"string"},
+                        "draft":{"type":"boolean"},
+                        "labels":{"type":"array","items":{"type":"string"}},
+                        "issue_numbers":{"type":"array","items":{"type":"integer"}}
+                    },
+                    "required":["title"],
+                    "additionalProperties":false
+                }),
+            ),
+            (
+                "list_github_issues".to_string(),
+                "List GitHub issues in the current repository. Args: {state?, limit?, labels?}. Args are optional.".to_string(),
+                serde_json::json!({
+                    "type":"object",
+                    "properties":{
+                        "state":{"type":"string"},
+                        "limit":{"type":"integer"},
+                        "labels":{"type":"string"}
+                    },
+                    "required":[],
+                    "additionalProperties":false
+                }),
+            ),
+            (
+                "read_github_issue".to_string(),
+                "Read a GitHub issue by number for review. Args: {number}.".to_string(),
+                serde_json::json!({
+                    "type":"object",
+                    "properties":{
+                        "number":{"type":"integer"}
+                    },
+                    "required":["number"],
+                    "additionalProperties":false
+                }),
+            ),
+            (
+                "create_issue".to_string(),
+                "Create a GitHub issue for deferred/future work using gh. Requires PUSH_APPROVED=YES. Args: {title, body?, labels?, assignees?}.".to_string(),
+                serde_json::json!({
+                    "type":"object",
+                    "properties":{
+                        "title":{"type":"string"},
+                        "body":{"type":"string"},
+                        "labels":{"type":"array","items":{"type":"string"}},
+                        "assignees":{"type":"array","items":{"type":"string"}}
+                    },
+                    "required":["title"],
+                    "additionalProperties":false
+                }),
+            ),
+            (
                 "git_create_feature_branch".to_string(),
                 "Create a new local feature branch. Args: {name}.".to_string(),
                 serde_json::json!({"type":"object","properties":{"name":{"type":"string"}},"required":["name"],"additionalProperties":false}),
-            ),
-            (
-                "git_merge_to_main".to_string(),
-                "Merge a feature branch into main. Args: {branch}. Pushes when PUSH_APPROVED=YES and GORKFORGE_ALLOW_MAIN_PUSH=YES for remote push.".to_string(),
-                serde_json::json!({"type":"object","properties":{"branch":{"type":"string"}},"required":["branch"],"additionalProperties":false}),
             ),
             (
                 "list_dir".to_string(),
@@ -252,8 +306,11 @@ impl ToolSet {
                     .unwrap_or("gorkforge overlay commit"),
             ),
             "git_push" => self.git_push(),
+            "open_pull_request" => self.open_pull_request(args),
+            "list_github_issues" => self.list_github_issues(args),
+            "read_github_issue" => self.read_github_issue(args),
+            "create_issue" => self.create_issue(args),
             "git_create_feature_branch" => self.git_create_feature_branch(args),
-            "git_merge_to_main" => self.git_merge_to_main(args),
             "list_dir" => self.list_dir(args),
             "grep" => self.grep(args),
             "shell_safe" => self.shell_safe(args),
@@ -667,86 +724,289 @@ impl ToolSet {
         Ok(format!("created feature branch '{}'", branch))
     }
 
-    fn git_merge_to_main(&self, args: &Value) -> Result<String> {
+    fn open_pull_request(&self, args: &Value) -> Result<String> {
         if !self.push_self_approved {
             return Err(anyhow!(
-                "git_merge_to_main blocked: PUSH_APPROVED=YES required for main merges"
+                "open_pull_request blocked: PUSH_APPROVED=YES required"
             ));
         }
 
-        let branch = args
-            .get("branch")
+        let title = args
+            .get("title")
             .and_then(|v| v.as_str())
-            .ok_or_else(|| anyhow!("git_merge_to_main: branch required"))?
+            .ok_or_else(|| anyhow!("open_pull_request: title required"))?
+            .trim()
+            .to_string();
+        if title.is_empty() {
+            return Err(anyhow!("open_pull_request: title cannot be empty"));
+        }
+
+        let body = args
+            .get("body")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
             .trim()
             .to_string();
 
-        if branch.is_empty() {
-            return Err(anyhow!("git_merge_to_main: branch cannot be empty"));
+        let base = args
+            .get("base")
+            .and_then(|v| v.as_str())
+            .unwrap_or("main")
+            .trim()
+            .to_string();
+
+        let head = if let Some(raw) = args.get("head").and_then(|v| v.as_str()) {
+            raw.trim().to_string()
+        } else {
+            run_command(
+                &self.sandbox.workspace_root,
+                "git",
+                &["rev-parse", "--abbrev-ref", "HEAD"],
+            )?
+            .trim()
+            .to_string()
+        };
+
+        let draft = args.get("draft").and_then(|v| v.as_bool()).unwrap_or(false);
+
+        let issue_numbers = args
+            .get("issue_numbers")
+            .and_then(|v| v.as_array())
+            .map(|vals| {
+                vals.iter()
+                    .filter_map(|v| v.as_u64())
+                    .map(|n| n.to_string())
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+
+        let labels = args
+            .get("labels")
+            .and_then(|v| v.as_array())
+            .map(|vals| {
+                vals.iter()
+                    .filter_map(|v| v.as_str())
+                    .map(|s| s.trim())
+                    .filter(|s| !s.is_empty())
+                    .map(str::to_string)
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+
+        if head.is_empty() {
+            return Err(anyhow!("open_pull_request: head branch cannot be empty"));
         }
-        if branch.contains("..")
-            || branch.contains('\n')
-            || branch.contains('\t')
-            || branch.contains(' ')
+        if head == "main" || head == "master" || head == "develop" || head == "trunk" {
+            return Err(anyhow!(
+                "open_pull_request: branch '{}' cannot be used as PR source",
+                head
+            ));
+        }
+        if base.is_empty() {
+            return Err(anyhow!("open_pull_request: base branch cannot be empty"));
+        }
+        if head.contains('\\') || base.contains('\\') {
+            return Err(anyhow!(
+                "open_pull_request: invalid branch separator in '{}' or '{}'",
+                head,
+                base
+            ));
+        }
+        if head.contains("..") || base.contains("..") {
+            return Err(anyhow!(
+                "open_pull_request: suspicious branch reference in '{}' or '{}'",
+                head,
+                base
+            ));
+        }
+        if head.contains('\n') || head.contains('\t') || base.contains('\n') || base.contains('\t')
         {
             return Err(anyhow!(
-                "git_merge_to_main: suspicious branch name '{}'",
-                branch
+                "open_pull_request: invalid branch/newline in '{}' or '{}'",
+                head,
+                base
             ));
         }
-        if branch == "main" || branch == "master" || branch == "develop" || branch == "trunk" {
+        if head.contains(' ') || base.contains(' ') {
             return Err(anyhow!(
-                "git_merge_to_main: cannot merge protected branch '{}'",
-                branch
+                "open_pull_request: branch names cannot contain spaces: '{}' / '{}'",
+                head,
+                base
             ));
         }
 
-        let has_ref = run_command(
-            &self.sandbox.workspace_root,
-            "git",
-            &[
-                "show-ref",
-                "--verify",
-                "--quiet",
-                &format!("refs/heads/{}", branch),
-            ],
-        );
-        if has_ref.is_err() {
-            return Err(anyhow!(
-                "git_merge_to_main: source branch '{}' not found locally",
-                branch
-            ));
+        let mut cli_args = vec![
+            "pr".to_string(),
+            "create".to_string(),
+            "--title".to_string(),
+            title,
+        ];
+        if !base.is_empty() {
+            cli_args.push("--base".to_string());
+            cli_args.push(base);
+        }
+        if !head.is_empty() {
+            cli_args.push("--head".to_string());
+            cli_args.push(head);
+        }
+        if draft {
+            cli_args.push("--draft".to_string());
+        }
+        for label in labels {
+            cli_args.push("--label".to_string());
+            cli_args.push(label);
+        }
+        if !body.is_empty() {
+            let mut full_body = body;
+            if !issue_numbers.is_empty() {
+                let closes = issue_numbers
+                    .iter()
+                    .map(|n| format!("Closes #{}", n))
+                    .collect::<Vec<_>>()
+                    .join("\n");
+                full_body = format!("{}\n\n{}", full_body, closes);
+            }
+            cli_args.push("--body".to_string());
+            cli_args.push(full_body);
+        } else if !issue_numbers.is_empty() {
+            let closes = issue_numbers
+                .iter()
+                .map(|n| format!("Closes #{}", n))
+                .collect::<Vec<_>>()
+                .join("\n");
+            cli_args.push("--body".to_string());
+            cli_args.push(closes);
         }
 
-        if branch.contains('\\') {
-            return Err(anyhow!(
-                "git_merge_to_main: invalid branch separator in '{}'",
-                branch
-            ));
+        let cli_refs: Vec<&str> = cli_args.iter().map(String::as_str).collect();
+        run_command(&self.sandbox.workspace_root, "gh", &cli_refs)
+    }
+
+    fn list_github_issues(&self, args: &Value) -> Result<String> {
+        let state = args
+            .get("state")
+            .and_then(|v| v.as_str())
+            .unwrap_or("open")
+            .trim()
+            .to_string();
+        let limit = args.get("limit").and_then(|v| v.as_u64()).unwrap_or(20);
+        let labels = args
+            .get("labels")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .trim()
+            .to_string();
+
+        let mut cli_args = vec![
+            "issue".to_string(),
+            "list".to_string(),
+            "--json".to_string(),
+            "number,title,url,state,labels,assignees".to_string(),
+        ];
+        if !state.is_empty() {
+            cli_args.push("--state".to_string());
+            cli_args.push(state);
         }
-        if !branch.starts_with("feature/") {
-            return Err(anyhow!(
-                "git_merge_to_main: source branch '{}' must be a feature branch",
-                branch
-            ));
+        if !labels.is_empty() {
+            cli_args.push("--label".to_string());
+            cli_args.push(labels);
+        }
+        cli_args.push("--limit".to_string());
+        cli_args.push(format!("{}", limit));
+
+        let cli_refs: Vec<&str> = cli_args.iter().map(String::as_str).collect();
+        run_command(&self.sandbox.workspace_root, "gh", &cli_refs)
+    }
+
+    fn read_github_issue(&self, args: &Value) -> Result<String> {
+        let number = args
+            .get("number")
+            .and_then(|v| v.as_u64())
+            .ok_or_else(|| anyhow!("read_github_issue: number required"))?;
+        if number == 0 {
+            return Err(anyhow!("read_github_issue: number must be positive"));
         }
 
-        let main_is_current = self.current_branch()?.eq_ignore_ascii_case("main");
-        if !main_is_current {
-            run_command(&self.sandbox.workspace_root, "git", &["checkout", "main"])?;
+        let number = number.to_string();
+        let cli_args = [
+            "issue",
+            "view",
+            number.as_str(),
+            "--json",
+            "number,title,body,state,labels,assignees,url",
+        ];
+        run_command(&self.sandbox.workspace_root, "gh", &cli_args)
+    }
+
+    fn create_issue(&self, args: &Value) -> Result<String> {
+        if !self.push_self_approved {
+            return Err(anyhow!("create_issue blocked: PUSH_APPROVED=YES required"));
         }
 
-        let merge_output = run_command(
-            &self.sandbox.workspace_root,
-            "git",
-            &["merge", "--no-ff", &branch],
-        )?;
-        let mut output = format!("merged '{}' into main\n{}", branch, merge_output);
-        output.push('\n');
-        output.push_str(&self.git_push()?);
-        self.sandbox
-            .log(&format!("git_merge_to_main: {}", branch))?;
-        Ok(output)
+        let title = args
+            .get("title")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| anyhow!("create_issue: title required"))?
+            .trim()
+            .to_string();
+        if title.is_empty() {
+            return Err(anyhow!("create_issue: title cannot be empty"));
+        }
+
+        let body = args
+            .get("body")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .trim()
+            .to_string();
+
+        let labels = args
+            .get("labels")
+            .and_then(|v| v.as_array())
+            .map(|vals| {
+                vals.iter()
+                    .filter_map(|v| v.as_str())
+                    .map(str::trim)
+                    .filter(|s| !s.is_empty())
+                    .map(str::to_string)
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+
+        let assignees = args
+            .get("assignees")
+            .and_then(|v| v.as_array())
+            .map(|vals| {
+                vals.iter()
+                    .filter_map(|v| v.as_str())
+                    .map(str::trim)
+                    .filter(|s| !s.is_empty())
+                    .map(str::to_string)
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+
+        let mut cli_args = vec![
+            "issue".to_string(),
+            "create".to_string(),
+            "--title".to_string(),
+            title,
+        ];
+        if !body.is_empty() {
+            cli_args.push("--body".to_string());
+            cli_args.push(body);
+        }
+        for label in labels {
+            cli_args.push("--label".to_string());
+            cli_args.push(label);
+        }
+        for assignee in assignees {
+            cli_args.push("--assignee".to_string());
+            cli_args.push(assignee);
+        }
+
+        let cli_refs: Vec<&str> = cli_args.iter().map(String::as_str).collect();
+        run_command(&self.sandbox.workspace_root, "gh", &cli_refs)
     }
 
     fn git_push(&self) -> Result<String> {
@@ -774,19 +1034,6 @@ impl ToolSet {
         }
 
         self.sandbox.push("origin", branch)
-    }
-
-    fn current_branch(&self) -> Result<String> {
-        let branch = run_command(
-            &self.sandbox.workspace_root,
-            "git",
-            &["rev-parse", "--abbrev-ref", "HEAD"],
-        )?;
-        let branch = branch.trim().to_string();
-        if branch.is_empty() || branch == "HEAD" || branch.contains("..") {
-            return Err(anyhow!("git: invalid branch '{}'", branch));
-        }
-        Ok(branch)
     }
 }
 
@@ -872,10 +1119,14 @@ fn run_command_allowlist(cwd: &Path, command: &str) -> Result<String> {
 
     let allowed = [
         "cargo", "git", "ls", "dir", "echo", "pwd", "rg", "findstr", "python", "python3", "node",
+        "gh",
     ];
     let program = parts.remove(0);
     if !allowed.contains(&program) {
         return Err(anyhow!("shell_safe disallows program {}", program));
+    }
+    if program == "git" && parts.first().is_some_and(|v| *v == "merge") {
+        return Err(anyhow!("shell_safe: blocked for branch merge safety"));
     }
 
     let output = Command::new(program)

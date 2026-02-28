@@ -3,7 +3,7 @@
 **goRkForge**  
 **Groks Self-Building, Self-Improving, Platform-Native Coding Agent**
 
-**Version:** 2.10 (Feb 28 2026) Stable self-editing pipeline + Rust 2024/1.93 + tree-sitter parsing
+**Version:** 2.12 (Feb 28 2026) Required implementation checklist + manual merge control
 **Canonical source of truth.**
 
 ## Vision (First Principles)
@@ -26,11 +26,26 @@ goRkForge is a Rust-native autonomous coding agent intended to scale from a loca
 
 - Full ReAct loop in `gorkforge-core`.
 - Grok API integration through `/v1/chat/completions`.
-- 13 built-in tools (including feature-branch + merge helpers): `read_file`, `edit_file`, `run_cargo`, `git_status`, `git_commit`, `git_push`, `git_create_feature_branch`, `git_merge_to_main`, `list_dir`, `grep`, `shell_safe`, `write_file`, `parse_rust_file`.
+- 16 built-in tools: `read_file`, `edit_file`, `run_cargo`, `git_status`, `git_commit`, `git_push`, `git_create_feature_branch`, `open_pull_request`, `create_issue`, `list_github_issues`, `read_github_issue`, `list_dir`, `grep`, `shell_safe`, `write_file`, `parse_rust_file`.
 - Auto-commit/push on edit/write + self-improve completion is enforced.
 - Speed optimizations enabled by default for edits/self-improve: `GORKFORGE_GATES_MODE=fast` (fmt --check + cargo check) with full gates available via `GORKFORGE_GATES_MODE=full`.
 - LLM context is trimmed by default (`special.md`, `Cargo.toml`, and key source files); full context requires `GORKFORGE_CONTEXT_FULL=YES`.
 - parse_rust_file tool added and verified.
+- `open_pull_request` is the preferred remote action for pull requests.
+- `open_pull_request` accepts `issue_numbers` to auto-link PRs to GitHub issues.
+- `create_issue` is the preferred remote action for backlog items and deferred implementation work.
+- `list_github_issues` + `read_github_issue` are the preferred tools for reviewing existing GitHub issues before coding.
+- Required issue-to-PR implementation checklist:
+  - `list_github_issues` (when task implies triage),
+  - `read_github_issue`,
+  - implement requested edits,
+  - `run_cargo`,
+  - `open_pull_request` with `issue_numbers` linking every consumed issue.
+- Manual merge gate:
+  - gork opens PRs but does not merge.
+  - Human reviewer must approve and merge via GitHub.
+- User retains merge approval control; PR tool opens changes but does not merge automatically.
+- `git_merge_to_main` was intentionally removed; remote merges are no longer performed automatically.
 - Auto-commit/push + tree-sitter parsing enabled.
 - Auto-commit and push pipeline verified after edit/write operations.
 - Workspace upgraded to Rust 2024 edition and `rust-version = "1.93"` across crates.

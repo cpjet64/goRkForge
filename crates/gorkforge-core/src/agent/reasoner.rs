@@ -2,6 +2,7 @@ use crate::agent::{TaskContext, TaskResult, TaskStatus};
 use crate::llm::{GrokClient, LlmMessage, ToolDefinition};
 use crate::tools::ToolSet;
 use anyhow::{Context, Result};
+use std::collections::HashSet;
 use std::fs;
 use std::path::Path;
 
@@ -26,6 +27,8 @@ impl ReActReasoner {
             .chars()
             .filter(|c| !c.is_ascii_whitespace())
             .collect::<String>();
+        let referenced_issue_numbers = Self::extract_referenced_issue_numbers(&task_flags);
+
         self.toolset.core_self_approved =
             self.toolset.core_self_approved || normalized_task.contains("self_approved:yes");
         self.toolset.push_self_approved =
@@ -46,9 +49,27 @@ impl ReActReasoner {
             || (task_flags.contains("tree-sitter")
                 && task_flags.contains("file")
                 && task_flags.contains("add"));
+        let requires_issue_review = task_flags.contains("issue")
+            || task_flags.contains("issues")
+            || task_flags.contains("github issue")
+            || task_flags.contains("github issues")
+            || task_flags.contains("pull request")
+            || task_flags.contains("open_pull_request")
+            || !referenced_issue_numbers.is_empty();
+        let requires_issue_listing = task_flags.contains("list issue")
+            || task_flags.contains("review issue")
+            || task_flags.contains("review issues")
+            || task_flags.contains("triage issue")
+            || task_flags.contains("issue triage");
+        let requires_linked_pr = requires_mutation || task_flags.contains("pull request");
         let mut used_mutating_tool = false;
         let mut seen_tool_use = false;
         let mut tooling_reminder_emitted = false;
+        let mut list_issues_called = false;
+        let mut read_issue_called = false;
+        let mut read_issue_numbers = HashSet::new();
+        let mut linked_pr_called = false;
+        let mut linked_issue_numbers: HashSet<u64> = HashSet::new();
         let tool_specs = self
             .toolset
             .tool_specs()
@@ -94,6 +115,72 @@ impl ReActReasoner {
                         status: TaskStatus::Failed,
                         output: "completion blocked: task requires tool usage".to_string(),
                     });
+                }
+
+                if requires_issue_review {
+                    if !referenced_issue_numbers.is_empty() {
+                        for issue in &referenced_issue_numbers {
+                            if !read_issue_numbers.contains(issue) {
+                                return Ok(TaskResult {
+                                    status: TaskStatus::Failed,
+                                    output: format!(
+                                        "completion blocked: referenced issue #{} was not loaded with read_github_issue",
+                                        issue
+                                    ),
+                                });
+                            }
+                        }
+                    }
+
+                    if requires_issue_listing && !list_issues_called {
+                        return Ok(TaskResult {
+                            status: TaskStatus::Failed,
+                            output:
+                                "completion blocked: issue workflow requires list_github_issues before implementation PR work"
+                                    .to_string(),
+                        });
+                    }
+
+                    if !read_issue_called {
+                        return Ok(TaskResult {
+                            status: TaskStatus::Failed,
+                            output:
+                                "completion blocked: issue workflow requires read_github_issue before completion"
+                                    .to_string(),
+                        });
+                    }
+
+                    if requires_linked_pr && !linked_pr_called {
+                        return Ok(TaskResult {
+                            status: TaskStatus::Failed,
+                            output:
+                                "completion blocked: issue workflow requires open_pull_request with issue_numbers"
+                                    .to_string(),
+                        });
+                    }
+
+                    if linked_pr_called && linked_issue_numbers.is_empty() {
+                        return Ok(TaskResult {
+                            status: TaskStatus::Failed,
+                            output:
+                                "completion blocked: issue workflow requires open_pull_request to include issue_numbers"
+                                    .to_string(),
+                        });
+                    }
+
+                    if requires_linked_pr && !referenced_issue_numbers.is_empty() {
+                        for issue in &referenced_issue_numbers {
+                            if !linked_issue_numbers.contains(issue) {
+                                return Ok(TaskResult {
+                                    status: TaskStatus::Failed,
+                                    output: format!(
+                                        "completion blocked: referenced issue #{} missing from open_pull_request.issue_numbers",
+                                        issue
+                                    ),
+                                });
+                            }
+                        }
+                    }
                 }
 
                 if requires_mutation && !used_mutating_tool {
@@ -150,6 +237,33 @@ impl ReActReasoner {
                 if matches!(call.name.as_str(), "edit_file" | "write_file") {
                     used_mutating_tool = true;
                 }
+                match call.name.as_str() {
+                    "list_github_issues" => {
+                        list_issues_called = true;
+                    }
+                    "read_github_issue" => {
+                        read_issue_called = true;
+                        if let Some(number) = call.arguments.get("number").and_then(|v| v.as_u64())
+                        {
+                            read_issue_numbers.insert(number);
+                        }
+                    }
+                    "open_pull_request" => {
+                        linked_pr_called = true;
+                        if let Some(list) = call
+                            .arguments
+                            .get("issue_numbers")
+                            .and_then(|v| v.as_array())
+                        {
+                            for n in list {
+                                if let Some(issue) = n.as_u64() {
+                                    linked_issue_numbers.insert(issue);
+                                }
+                            }
+                        }
+                    }
+                    _ => {}
+                }
                 seen_tool_use = true;
                 let result = self
                     .toolset
@@ -197,16 +311,27 @@ impl ReActReasoner {
 
         Ok(TaskResult {
             status: TaskStatus::Failed,
-            output: match (requires_mutation && !used_mutating_tool, last_tool_error) {
-                (true, _) => {
-                    "max iterations reached: task required mutating tool usage but none was used"
-                        .to_string()
+            output: {
+                if requires_issue_review {
+                    if let Some(err) = &last_tool_error {
+                        format!(
+                            "max iterations reached: issue workflow could not complete required checks ({err})"
+                        )
+                    } else if requires_mutation && !used_mutating_tool {
+                        "max iterations reached: issue workflow required mutating tool usage but none was used"
+                            .to_string()
+                    } else {
+                        "max iterations reached: issue workflow could not complete required checks"
+                            .to_string()
+                    }
+                } else if let Some(err) = &last_tool_error {
+                    format!(
+                        "max iterations reached: {} (last tool error: {err})",
+                        self.max_iter
+                    )
+                } else {
+                    format!("max iterations reached: {}", self.max_iter)
                 }
-                (_, Some(err)) => format!(
-                    "max iterations reached: {} (last tool error: {err})",
-                    self.max_iter
-                ),
-                (_, None) => format!("max iterations reached: {}", self.max_iter),
             },
         })
     }
@@ -275,6 +400,12 @@ impl ReActReasoner {
         prompt.push_str(
             "Return PLAN and PATCH text for requested edits, but do not claim work is done without tool calls.\n",
         );
+        prompt.push_str(
+            "For issue-driven work, use `list_github_issues` and `read_github_issue` to select a concrete issue, then implement and open PR with `open_pull_request` including `issue_numbers` so it links automatically.\n",
+        );
+        prompt.push_str(
+            "Issue-driven tasks are validated as: list_github_issues (when listed) -> read_github_issue -> open_pull_request with issue_numbers for implementation.\n",
+        );
 
         if let Some(policy_file) = &context.policy_file {
             prompt.push_str(&format!("Policy file: {}\n", policy_file));
@@ -296,6 +427,37 @@ impl ReActReasoner {
     fn self_improve_format_ok(output: &str) -> bool {
         let out = output.to_ascii_lowercase();
         out.contains("plan:") && out.contains("patch:")
+    }
+
+    fn extract_referenced_issue_numbers(task: &str) -> Vec<u64> {
+        let bytes = task.as_bytes();
+        let mut values = Vec::new();
+        let mut i = 0usize;
+
+        while i < bytes.len() {
+            if bytes[i] == b'#' {
+                let mut j = i + 1;
+                let mut value = 0u64;
+                let mut found_digit = false;
+
+                while j < bytes.len() && bytes[j].is_ascii_digit() {
+                    found_digit = true;
+                    value = value
+                        .saturating_mul(10)
+                        .saturating_add((bytes[j] - b'0') as u64);
+                    j += 1;
+                }
+
+                if found_digit {
+                    values.push(value);
+                }
+            }
+            i += 1;
+        }
+
+        values.sort_unstable();
+        values.dedup();
+        values
     }
 }
 
