@@ -4,6 +4,8 @@ use serde_json::Value;
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use tree_sitter::Parser;
+use tree_sitter_rust::LANGUAGE;
 
 use crate::agent::TaskContext;
 use crate::sandbox::{run_command, Sandbox};
@@ -116,6 +118,16 @@ impl ToolSet {
     pub fn tool_specs(&self) -> Vec<(String, String, Value)> {
         vec![
             (
+                "parse_rust_file".to_string(),
+                "Parse a Rust file and summarize functions and structs by name. Args: {path}.".to_string(),
+                serde_json::json!({
+                    "type":"object",
+                    "properties":{"path":{"type":"string"}},
+                    "required":["path"],
+                    "additionalProperties":false
+                }),
+            ),
+            (
                 "read_file".to_string(),
                 "Read file content from overlay workspace by path. Args: {path}.".to_string(),
                 serde_json::json!({
@@ -193,6 +205,7 @@ impl ToolSet {
 
     pub async fn execute(&self, name: &str, args: &Value, ctx: &TaskContext) -> Result<String> {
         let result = match name {
+            "parse_rust_file" => self.parse_rust_file(args),
             "read_file" => self.read_file(args),
             "edit_file" => self.edit_file(args),
             "write_file" => self.write_file(args),
@@ -262,6 +275,60 @@ impl ToolSet {
         let target = self.ensure_overlay_copy(rel)?;
 
         std::fs::read_to_string(&target).with_context(|| format!("read file {}", target.display()))
+    }
+
+    fn parse_rust_file(&self, args: &Value) -> Result<String> {
+        if !self.policy.read_allowed() {
+            return Err(anyhow!("policy denies file_read"));
+        }
+
+        let rel = args
+            .get("path")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| anyhow!("parse_rust_file: path required"))?;
+
+        let overlay_target = self.sandbox.overlay_root.join(rel);
+        let target = if overlay_target.exists() {
+            overlay_target
+        } else {
+            ToolSet::overlay_or_workspace_path(&self.sandbox.workspace_root, rel)?
+        };
+        let src = std::fs::read_to_string(&target)
+            .with_context(|| format!("parse_rust_file: failed reading {}", target.display()))?;
+
+        let mut parser = Parser::new();
+        let language = LANGUAGE.into();
+        if let Err(err) = parser.set_language(&language) {
+            return Err(anyhow!("parse_rust_file: language setup failed: {:?}", err));
+        }
+        let tree = parser
+            .parse(&src, None)
+            .ok_or_else(|| anyhow!("parse_rust_file: parse failed"))?;
+
+        let mut functions = Vec::new();
+        let mut structs = Vec::new();
+        collect_rust_decls(
+            tree.root_node(),
+            src.as_bytes(),
+            &mut functions,
+            &mut structs,
+        );
+
+        let functions = functions
+            .into_iter()
+            .map(|name| format!(r#""{}""#, name))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let structs = structs
+            .into_iter()
+            .map(|name| format!(r#""{}""#, name))
+            .collect::<Vec<_>>()
+            .join(", ");
+
+        Ok(format!(
+            "Functions: [{}]\nStructs: [{}]",
+            functions, structs
+        ))
     }
 
     fn edit_file(&self, args: &Value) -> Result<String> {
@@ -527,6 +594,44 @@ fn gather_files_for_scan<F: FnMut(&PathBuf)>(dir: &Path, mut f: F) -> Result<()>
     skipped.insert(dir.join("target"));
     skipped.insert(dir.join(".gorkforge"));
     gather_files_internal(dir, &skipped, &mut f)
+}
+
+fn collect_rust_decls(
+    node: tree_sitter::Node<'_>,
+    source: &[u8],
+    functions: &mut Vec<String>,
+    structs: &mut Vec<String>,
+) {
+    let mut stack = vec![node];
+
+    while let Some(current) = stack.pop() {
+        match current.kind() {
+            "function_item" => {
+                if let Some(name_node) = current.child_by_field_name("name") {
+                    if let Ok(name) = name_node.utf8_text(source) {
+                        functions.push(name.to_string());
+                    }
+                }
+            }
+            "struct_item" => {
+                if let Some(name_node) = current.child_by_field_name("name") {
+                    if let Ok(name) = name_node.utf8_text(source) {
+                        structs.push(name.to_string());
+                    }
+                }
+            }
+            _ => {}
+        }
+
+        let mut i = 0u32;
+        let child_count = current.named_child_count() as u32;
+        while i < child_count {
+            if let Some(child) = current.named_child(i) {
+                stack.push(child);
+            }
+            i += 1;
+        }
+    }
 }
 
 fn gather_files_internal<F: FnMut(&PathBuf)>(

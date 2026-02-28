@@ -26,7 +26,7 @@ goRkForge is a Rust-native autonomous coding agent intended to scale from a loca
 
 - Full ReAct loop in `gorkforge-core`.
 - Grok API integration through `/v1/chat/completions`.
-- 10 built-in tools: `read_file`, `edit_file`, `run_cargo`, `git_status`, `git_commit`, `git_push`, `list_dir`, `grep`, `shell_safe`, `write_file`.
+- 11 built-in tools: `read_file`, `edit_file`, `run_cargo`, `git_status`, `git_commit`, `git_push`, `list_dir`, `grep`, `shell_safe`, `write_file`, `parse_rust_file`.
 
 ## Phase 2 (in progress, stabilization pass)
 
