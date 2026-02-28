@@ -266,7 +266,7 @@ impl ToolSet {
                         "labels":{"type":"array","items":{"type":"string"}},
                         "assignees":{"type":"array","items":{"type":"string"}}
                     },
-                    "required":["title"],
+                    "required":["title", "body"],
                     "additionalProperties":false
                 }),
             ),
@@ -957,12 +957,15 @@ impl ToolSet {
             return Err(anyhow!("create_issue: title cannot be empty"));
         }
 
-        let body = args
+        let mut body = args
             .get("body")
             .and_then(|v| v.as_str())
-            .unwrap_or("")
+            .unwrap_or("Created by goRkForge.")
             .trim()
             .to_string();
+        if body.is_empty() {
+            body = "Created by goRkForge.".to_string();
+        }
 
         let labels = args
             .get("labels")
