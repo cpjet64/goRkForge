@@ -49,7 +49,12 @@ impl ReActReasoner {
             || (task_flags.contains("tree-sitter")
                 && task_flags.contains("file")
                 && task_flags.contains("add"));
-        let is_issue_creation = normalized_task.contains("createissue")
+        let is_issue_creation = task_flags.contains("create issue")
+            || task_flags.contains("create an issue")
+            || task_flags.contains("create a issue")
+            || task_flags.contains("create github issue")
+            || task_flags.contains("create a github issue")
+            || normalized_task.contains("createissue")
             || normalized_task.contains("creategithubissue");
 
         let requires_issue_review = !is_issue_creation
