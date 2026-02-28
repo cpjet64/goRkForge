@@ -1,9 +1,10 @@
 use std::time::Duration;
 
 use anyhow::{anyhow, Context, Result};
-use reqwest::Client;
+use reqwest::{Client, StatusCode};
 use serde::Serialize;
 use serde_json::{self, Value};
+use tokio::time::sleep;
 
 #[derive(Clone, Debug)]
 pub struct LlmMessage {
@@ -43,7 +44,7 @@ impl GrokClient {
         Self {
             api_key,
             client: Client::builder()
-                .timeout(Duration::from_secs(120))
+                .timeout(Duration::from_secs(10))
                 .build()
                 .unwrap_or_else(|_| Client::new()),
             model,
@@ -98,53 +99,83 @@ impl GrokClient {
             tool_choice: "auto".to_string(),
         };
 
-        let response = self
-            .client
-            .post("https://api.x.ai/v1/chat/completions")
-            .bearer_auth(&self.api_key)
-            .json(&request)
-            .send()
-            .await
-            .context("failed to call xAI chat completions API")?;
+        let mut last_err = None;
+        for attempt in 1..=3u8 {
+            let response = self
+                .client
+                .post("https://api.x.ai/v1/chat/completions")
+                .bearer_auth(&self.api_key)
+                .json(&request)
+                .send()
+                .await;
 
-        if !response.status().is_success() {
-            let code = response.status();
-            let body = response
-                .text()
-                .await
-                .unwrap_or_else(|_| "<unable to read body>".to_string());
-            return Err(anyhow!("xAI API returned {}: {}", code, body));
-        }
+            match response {
+                Ok(response) => {
+                    if !response.status().is_success() {
+                        let code = response.status();
+                        let body = response
+                            .text()
+                            .await
+                            .unwrap_or_else(|_| "<unable to read body>".to_string());
 
-        let payload = response
-            .json::<ResponseEnvelope>()
-            .await
-            .context("invalid /chat/completions response")?;
+                        if code.is_server_error()
+                            || code == StatusCode::TOO_MANY_REQUESTS
+                            || code == StatusCode::REQUEST_TIMEOUT
+                        {
+                            last_err = Some(anyhow!("xAI API returned {}: {}", code, body));
+                            if attempt < 3 {
+                                sleep(Duration::from_millis(200 * u64::from(attempt))).await;
+                                continue;
+                            }
+                        }
 
-        let choice = payload
-            .choices
-            .into_iter()
-            .next()
-            .ok_or_else(|| anyhow!("xAI API returned no completion choice"))?;
+                        return Err(anyhow!("xAI API returned {}: {}", code, body));
+                    }
 
-        let mut turn = LlmTurn {
-            content: choice.message.content,
-            tool_calls: Vec::new(),
-        };
+                    let payload = response
+                        .json::<ResponseEnvelope>()
+                        .await
+                        .context("invalid /chat/completions response")?;
 
-        if let Some(calls) = choice.message.tool_calls {
-            for call in calls {
-                let args = serde_json::from_str::<Value>(&call.function.arguments)
-                    .unwrap_or_else(|_| Value::Object(serde_json::Map::new()));
-                turn.tool_calls.push(GrokTool {
-                    id: call.id,
-                    name: call.function.name,
-                    arguments: args,
-                });
+                    let choice = payload
+                        .choices
+                        .into_iter()
+                        .next()
+                        .ok_or_else(|| anyhow!("xAI API returned no completion choice"))?;
+
+                    let mut turn = LlmTurn {
+                        content: choice.message.content,
+                        tool_calls: Vec::new(),
+                    };
+
+                    if let Some(calls) = choice.message.tool_calls {
+                        for call in calls {
+                            let args = serde_json::from_str::<Value>(&call.function.arguments)
+                                .unwrap_or_else(|_| Value::Object(serde_json::Map::new()));
+                            turn.tool_calls.push(GrokTool {
+                                id: call.id,
+                                name: call.function.name,
+                                arguments: args,
+                            });
+                        }
+                    }
+
+                    return Ok(turn);
+                }
+                Err(err) => {
+                    last_err = Some(anyhow!(err));
+                    if attempt < 3 {
+                        sleep(Duration::from_millis(200 * u64::from(attempt))).await;
+                        continue;
+                    }
+                }
             }
         }
 
-        Ok(turn)
+        Err(anyhow!(
+            "xAI API request failed after retries: {}",
+            last_err.unwrap_or_else(|| anyhow!("unknown error"))
+        ))
     }
 }
 

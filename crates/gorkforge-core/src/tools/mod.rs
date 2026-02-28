@@ -100,6 +100,7 @@ pub struct ToolSet {
     pub sandbox: Sandbox,
     pub policy: PolicyConfig,
     pub core_self_approved: bool,
+    pub push_self_approved: bool,
 }
 
 impl ToolSet {
@@ -108,6 +109,7 @@ impl ToolSet {
             sandbox,
             policy,
             core_self_approved: std::env::var("SELF_APPROVED").is_ok_and(|v| v == "YES"),
+            push_self_approved: std::env::var("PUSH_APPROVED").is_ok_and(|v| v == "YES"),
         }
     }
 
@@ -163,8 +165,13 @@ impl ToolSet {
             ),
             (
                 "git_commit".to_string(),
-                "Commit overlay changes. Args: {message}.".to_string(),
+                "Commit overlay changes with normalized message. Args: {message}.".to_string(),
                 serde_json::json!({"type":"object","properties":{"message":{"type":"string"}},"additionalProperties":false}),
+            ),
+            (
+                "git_push".to_string(),
+                "Push current branch to origin. Requires PUSH_APPROVED=YES and safe branch.".to_string(),
+                serde_json::json!({"type":"object","properties":{},"additionalProperties":false}),
             ),
             (
                 "list_dir".to_string(),
@@ -196,6 +203,7 @@ impl ToolSet {
                     .and_then(|v| v.as_str())
                     .unwrap_or("gorkforge overlay commit"),
             ),
+            "git_push" => self.git_push(),
             "list_dir" => self.list_dir(args),
             "grep" => self.grep(args),
             "shell_safe" => self.shell_safe(args),
@@ -303,6 +311,7 @@ impl ToolSet {
         self.sandbox
             .log(&format!("edit_file {}", target.display()))?;
         self.run_cargo_checks("edit_file")?;
+        self.auto_commit_and_push("edit_file")?;
 
         Ok(format!("edited {}", rel))
     }
@@ -338,6 +347,7 @@ impl ToolSet {
         self.sandbox
             .log(&format!("write_file {}", target.display()))?;
         self.run_cargo_checks("write_file")?;
+        self.auto_commit_and_push("write_file")?;
         Ok(format!("wrote {}", rel))
     }
 
@@ -454,8 +464,55 @@ impl ToolSet {
         run_command(&self.sandbox.workspace_root, "git", &["status", "--short"])
     }
 
+    fn has_workspace_changes(&self) -> Result<bool> {
+        let status = self.git_status()?;
+        Ok(!status.trim().is_empty())
+    }
+
+    pub(crate) fn auto_commit_and_push(&self, reason: &str) -> Result<String> {
+        if !self.has_workspace_changes()? {
+            return Ok("no workspace changes to commit".to_string());
+        }
+
+        let commit_msg = format!("gorkforge: {}", reason);
+        let mut output = self.git_commit(&commit_msg)?;
+
+        if self.push_self_approved {
+            output.push('\n');
+            output.push_str(&self.git_push()?);
+        }
+
+        Ok(output)
+    }
+
     fn git_commit(&self, message: &str) -> Result<String> {
-        self.sandbox.commit(message)
+        let message = if message.starts_with("gorkforge: ") {
+            message.to_string()
+        } else {
+            format!("gorkforge: {}", message)
+        };
+        self.sandbox.commit(&message)
+    }
+
+    fn git_push(&self) -> Result<String> {
+        if !self.push_self_approved {
+            return Err(anyhow!("push blocked: PUSH_APPROVED=YES required"));
+        }
+
+        let branch = run_command(
+            &self.sandbox.workspace_root,
+            "git",
+            &["rev-parse", "--abbrev-ref", "HEAD"],
+        )?;
+        let branch = branch.trim();
+        if branch == "main" || branch == "master" || branch == "develop" || branch == "trunk" {
+            return Err(anyhow!("push blocked: branch '{}' is protected", branch));
+        }
+        if branch.is_empty() || branch == "HEAD" || branch.contains("..") {
+            return Err(anyhow!("push blocked: invalid branch '{}'", branch));
+        }
+
+        self.sandbox.push("origin", branch)
     }
 }
 

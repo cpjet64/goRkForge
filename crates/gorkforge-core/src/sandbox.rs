@@ -79,6 +79,12 @@ impl Sandbox {
         self.log(&format!("git commit: {}", message))?;
         Ok(output)
     }
+
+    pub fn push(&self, remote: &str, branch: &str) -> Result<String> {
+        let output = run_command(&self.workspace_root, "git", &["push", remote, branch])?;
+        self.log(&format!("git push: {} {}", remote, branch))?;
+        Ok(output)
+    }
 }
 
 pub fn run_command(cwd: &Path, program: &str, args: &[&str]) -> Result<String> {

@@ -3,7 +3,7 @@
 **goRkForge**  
 **Groks Self-Building, Self-Improving, Platform-Native Coding Agent**
 
-**Version:** 2.7 (Feb 28 2026)  Noisy output cleanup + Phase 2 readiness
+**Version:** 2.8 (Feb 28 2026)  Flag detection, LLM timeout/retry, and auto-commit/push hardening
 **Canonical source of truth.**
 
 ## Vision (First Principles)
@@ -26,7 +26,14 @@ goRkForge is a Rust-native autonomous coding agent intended to scale from a loca
 
 - Full ReAct loop in `gorkforge-core`.
 - Grok API integration through `/v1/chat/completions`.
-- 9 built-in tools: `read_file`, `edit_file`, `run_cargo`, `git_status`, `git_commit`, `list_dir`, `grep`, `shell_safe`, `write_file`.
+- 10 built-in tools: `read_file`, `edit_file`, `run_cargo`, `git_status`, `git_commit`, `git_push`, `list_dir`, `grep`, `shell_safe`, `write_file`.
+
+## Phase 2 (in progress, stabilization pass)
+
+- Parse `SELF_APPROVED: YES` and `PUSH_APPROVED: YES` directly from task prompts at run start.
+- Add LLM retry + timeout controls for xAI chat calls (`10s` timeout, up to `3` attempts).
+- Complete git workflow from overlay edits: auto commit/push after successful writes and on self-improve completion.
+- Harden push flow with branch protection and explicit approval checks.
 - Overlay sandbox in `.gorkforge/runs` with staged apply path and logging.
 - Local run gates after edits (`cargo fmt --check`, `cargo clippy -- -D warnings`, `cargo test`, `cargo build`).
 
