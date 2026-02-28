@@ -463,7 +463,11 @@ impl ToolSet {
         };
 
         if replacement == existing {
-            return Ok(format!("no change for {}", rel));
+            return Err(anyhow!(
+                "edit_file no-op: replace target not found in {} for find={:?}",
+                rel,
+                find
+            ));
         }
 
         if let Some(parent) = target.parent() {
@@ -503,6 +507,14 @@ impl ToolSet {
         let target = self.sandbox.overlay_root.join(rel);
         if let Some(parent) = target.parent() {
             std::fs::create_dir_all(parent)?;
+        }
+
+        if target.exists() {
+            let existing = std::fs::read_to_string(&target)
+                .with_context(|| format!("read target file {}", target.display()))?;
+            if existing == content {
+                return Err(anyhow!("write_file no-op: content unchanged for {}", rel));
+            }
         }
 
         std::fs::write(&target, content)?;

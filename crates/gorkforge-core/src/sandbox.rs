@@ -102,9 +102,14 @@ pub fn run_command(cwd: &Path, program: &str, args: &[&str]) -> Result<String> {
 
     if !output.status.success() {
         return Err(anyhow::anyhow!(
-            "command failed: {} {}",
+            "command failed: {} {}{}",
             program,
-            args.join(" ")
+            args.join(" "),
+            if combined.is_empty() {
+                String::new()
+            } else {
+                format!("\n{}", combined)
+            }
         ));
     }
 

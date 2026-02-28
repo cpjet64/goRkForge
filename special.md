@@ -48,6 +48,7 @@ goRkForge is a Rust-native autonomous coding agent intended to scale from a loca
 - `git_merge_to_main` was intentionally removed; remote merges are no longer performed automatically.
 - Auto-commit/push + tree-sitter parsing enabled.
 - Auto-commit and push pipeline verified after edit/write operations.
+- PR flow smoke: issue #8 now has merge-ready branch and PR workflow validation
 - Workspace upgraded to Rust 2024 edition and `rust-version = "1.93"` across crates.
 - Reliability smoke test line from direct self-edit run
 
