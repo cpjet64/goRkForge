@@ -41,14 +41,6 @@ impl ReActReasoner {
             || task_flags.contains("append")
             || task_flags.contains("tree-sitter")
             || task_flags.contains("parse_rust_file");
-        let requires_mutation = task_flags.contains("add")
-            || task_flags.contains("create")
-            || task_flags.contains("edit")
-            || task_flags.contains("update")
-            || task_flags.contains("append")
-            || (task_flags.contains("tree-sitter")
-                && task_flags.contains("file")
-                && task_flags.contains("add"));
         let is_issue_creation = task_flags.contains("create issue")
             || task_flags.contains("create an issue")
             || task_flags.contains("create a issue")
@@ -56,6 +48,15 @@ impl ReActReasoner {
             || task_flags.contains("create a github issue")
             || normalized_task.contains("createissue")
             || normalized_task.contains("creategithubissue");
+        let requires_mutation = (task_flags.contains("add")
+            || task_flags.contains("create")
+            || task_flags.contains("edit")
+            || task_flags.contains("update")
+            || task_flags.contains("append")
+            || (task_flags.contains("tree-sitter")
+                && task_flags.contains("file")
+                && task_flags.contains("add")))
+            && !is_issue_creation;
 
         let requires_issue_review = !is_issue_creation
             && (!referenced_issue_numbers.is_empty()
