@@ -186,6 +186,16 @@ impl ToolSet {
                 serde_json::json!({"type":"object","properties":{},"additionalProperties":false}),
             ),
             (
+                "git_create_feature_branch".to_string(),
+                "Create a new local feature branch. Args: {name}.".to_string(),
+                serde_json::json!({"type":"object","properties":{"name":{"type":"string"}},"required":["name"],"additionalProperties":false}),
+            ),
+            (
+                "git_merge_to_main".to_string(),
+                "Merge a feature branch into main. Args: {branch}. Pushes when PUSH_APPROVED=YES and GORKFORGE_ALLOW_MAIN_PUSH=YES for remote push.".to_string(),
+                serde_json::json!({"type":"object","properties":{"branch":{"type":"string"}},"required":["branch"],"additionalProperties":false}),
+            ),
+            (
                 "list_dir".to_string(),
                 "List directory entries. Args: {path}.".to_string(),
                 serde_json::json!({"type":"object","properties":{"path":{"type":"string"}},"additionalProperties":false}),
@@ -217,6 +227,8 @@ impl ToolSet {
                     .unwrap_or("gorkforge overlay commit"),
             ),
             "git_push" => self.git_push(),
+            "git_create_feature_branch" => self.git_create_feature_branch(args),
+            "git_merge_to_main" => self.git_merge_to_main(args),
             "list_dir" => self.list_dir(args),
             "grep" => self.grep(args),
             "shell_safe" => self.shell_safe(args),
@@ -566,6 +578,136 @@ impl ToolSet {
         self.sandbox.commit(&message)
     }
 
+    fn git_create_feature_branch(&self, args: &Value) -> Result<String> {
+        let raw = args
+            .get("name")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| anyhow!("git_create_feature_branch: name required"))?
+            .trim();
+
+        if raw.is_empty() {
+            return Err(anyhow!(
+                "git_create_feature_branch: branch name cannot be empty"
+            ));
+        }
+        if raw.contains(' ') || raw.contains('\n') || raw.contains('\t') || raw.contains('\\') {
+            return Err(anyhow!(
+                "git_create_feature_branch: invalid branch name '{}'",
+                raw
+            ));
+        }
+        if raw.contains("..") {
+            return Err(anyhow!(
+                "git_create_feature_branch: suspicious branch path '{}'",
+                raw
+            ));
+        }
+
+        let branch = if raw.starts_with("feature/") {
+            raw.to_string()
+        } else {
+            format!("feature/{}", raw)
+        };
+        let protected = ["main", "master", "develop", "trunk"];
+        if protected.iter().any(|b| *b == branch) {
+            return Err(anyhow!(
+                "git_create_feature_branch: branch '{}' is protected",
+                branch
+            ));
+        }
+
+        run_command(
+            &self.sandbox.workspace_root,
+            "git",
+            &["checkout", "-b", &branch],
+        )?;
+        self.sandbox
+            .log(&format!("git_create_feature_branch: {}", branch))?;
+        Ok(format!("created feature branch '{}'", branch))
+    }
+
+    fn git_merge_to_main(&self, args: &Value) -> Result<String> {
+        if !self.push_self_approved {
+            return Err(anyhow!(
+                "git_merge_to_main blocked: PUSH_APPROVED=YES required for main merges"
+            ));
+        }
+
+        let branch = args
+            .get("branch")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| anyhow!("git_merge_to_main: branch required"))?
+            .trim()
+            .to_string();
+
+        if branch.is_empty() {
+            return Err(anyhow!("git_merge_to_main: branch cannot be empty"));
+        }
+        if branch.contains("..")
+            || branch.contains('\n')
+            || branch.contains('\t')
+            || branch.contains(' ')
+        {
+            return Err(anyhow!(
+                "git_merge_to_main: suspicious branch name '{}'",
+                branch
+            ));
+        }
+        if branch == "main" || branch == "master" || branch == "develop" || branch == "trunk" {
+            return Err(anyhow!(
+                "git_merge_to_main: cannot merge protected branch '{}'",
+                branch
+            ));
+        }
+
+        let has_ref = run_command(
+            &self.sandbox.workspace_root,
+            "git",
+            &[
+                "show-ref",
+                "--verify",
+                "--quiet",
+                &format!("refs/heads/{}", branch),
+            ],
+        );
+        if has_ref.is_err() {
+            return Err(anyhow!(
+                "git_merge_to_main: source branch '{}' not found locally",
+                branch
+            ));
+        }
+
+        if branch.contains('\\') {
+            return Err(anyhow!(
+                "git_merge_to_main: invalid branch separator in '{}'",
+                branch
+            ));
+        }
+        if !branch.starts_with("feature/") {
+            return Err(anyhow!(
+                "git_merge_to_main: source branch '{}' must be a feature branch",
+                branch
+            ));
+        }
+
+        let main_is_current = self.current_branch()?.eq_ignore_ascii_case("main");
+        if !main_is_current {
+            run_command(&self.sandbox.workspace_root, "git", &["checkout", "main"])?;
+        }
+
+        let merge_output = run_command(
+            &self.sandbox.workspace_root,
+            "git",
+            &["merge", "--no-ff", &branch],
+        )?;
+        let mut output = format!("merged '{}' into main\n{}", branch, merge_output);
+        output.push('\n');
+        output.push_str(&self.git_push()?);
+        self.sandbox
+            .log(&format!("git_merge_to_main: {}", branch))?;
+        Ok(output)
+    }
+
     fn git_push(&self) -> Result<String> {
         if !self.push_self_approved {
             return Err(anyhow!("push blocked: PUSH_APPROVED=YES required"));
@@ -577,7 +719,13 @@ impl ToolSet {
             &["rev-parse", "--abbrev-ref", "HEAD"],
         )?;
         let branch = branch.trim();
-        if branch == "main" || branch == "master" || branch == "develop" || branch == "trunk" {
+        let allow_main_push = std::env::var("GORKFORGE_ALLOW_MAIN_PUSH")
+            .ok()
+            .is_some_and(|v| v == "YES");
+
+        if (branch == "main" || branch == "master" || branch == "develop" || branch == "trunk")
+            && !allow_main_push
+        {
             return Err(anyhow!("push blocked: branch '{}' is protected", branch));
         }
         if branch.is_empty() || branch == "HEAD" || branch.contains("..") {
@@ -585,6 +733,19 @@ impl ToolSet {
         }
 
         self.sandbox.push("origin", branch)
+    }
+
+    fn current_branch(&self) -> Result<String> {
+        let branch = run_command(
+            &self.sandbox.workspace_root,
+            "git",
+            &["rev-parse", "--abbrev-ref", "HEAD"],
+        )?;
+        let branch = branch.trim().to_string();
+        if branch.is_empty() || branch == "HEAD" || branch.contains("..") {
+            return Err(anyhow!("git: invalid branch '{}'", branch));
+        }
+        Ok(branch)
     }
 }
 
