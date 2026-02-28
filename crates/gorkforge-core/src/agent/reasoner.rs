@@ -21,25 +21,19 @@ impl ReActReasoner {
     }
 
     pub async fn run_task(&mut self, context: &TaskContext) -> Result<TaskResult> {
-        let task_flags = context.task.to_ascii_uppercase();
+        let task_flags = context.task.to_ascii_lowercase();
         self.toolset.core_self_approved =
-            self.toolset.core_self_approved || task_flags.contains("SELF_APPROVED: YES");
+            self.toolset.core_self_approved || task_flags.contains("self_approved: yes");
         self.toolset.push_self_approved =
-            self.toolset.push_self_approved || task_flags.contains("PUSH_APPROVED: YES");
-        let task_lower = context.task.to_ascii_lowercase();
-        let requires_tooling = task_lower.contains(" add ")
-            || task_lower.contains(" create ")
-            || task_lower.contains(" edit ")
-            || task_lower.contains(" write ")
-            || task_lower.contains(" update ")
-            || task_lower.contains(" append ")
-            || task_lower.contains("register ")
-            || task_lower.contains("run_cargo")
-            || task_lower.contains("auto-commit")
-            || task_lower.contains("auto push")
-            || task_lower.contains("parse_rust_file")
-            || task_lower.contains("special.md")
-            || task_lower.contains("phase 1");
+            self.toolset.push_self_approved || task_flags.contains("push_approved: yes");
+
+        let requires_tooling = task_flags.contains("add")
+            || task_flags.contains("create")
+            || task_flags.contains("edit")
+            || task_flags.contains("update")
+            || task_flags.contains("append")
+            || task_flags.contains("tree-sitter")
+            || task_flags.contains("parse_rust_file");
 
         let system_prompt = self.system_prompt(context);
         let mut messages = vec![LlmMessage {
@@ -73,7 +67,7 @@ impl ReActReasoner {
                 if requires_tooling {
                     return Ok(TaskResult {
                         status: TaskStatus::Failed,
-                        output: "completion blocked: requested task requires tool usage, but no tool calls were made".to_string(),
+                        output: "completion blocked: task requires tool usage".to_string(),
                     });
                 }
 

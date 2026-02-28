@@ -46,11 +46,13 @@ impl GrokClient {
         let timeout = std::env::var("GORKFORGE_LLM_TIMEOUT_SECONDS")
             .ok()
             .and_then(|value| value.parse::<u64>().ok())
-            .unwrap_or(30);
+            .filter(|v| *v > 0)
+            .unwrap_or(60);
 
         let max_retries = std::env::var("GORKFORGE_LLM_MAX_RETRIES")
             .ok()
             .and_then(|value| value.parse::<u8>().ok())
+            .filter(|v| *v > 0)
             .unwrap_or(3);
 
         let request_timeout = Duration::from_secs(timeout);
@@ -116,6 +118,7 @@ impl GrokClient {
 
         let mut last_err = None;
         for attempt in 1..=self.max_retries {
+            let backoff_ms = 200u64 * u64::from(attempt);
             let response = self
                 .client
                 .post("https://api.x.ai/v1/chat/completions")
@@ -138,8 +141,8 @@ impl GrokClient {
                             || code == StatusCode::REQUEST_TIMEOUT
                         {
                             last_err = Some(anyhow!("xAI API returned {}: {}", code, body));
-                            if attempt < 3 {
-                                sleep(Duration::from_millis(200 * u64::from(attempt))).await;
+                            if attempt < self.max_retries {
+                                sleep(Duration::from_millis(backoff_ms)).await;
                                 continue;
                             }
                         }
@@ -188,7 +191,7 @@ impl GrokClient {
                         && (err.is_timeout() || err.is_connect() || err.is_request())
                     {
                         last_err = Some(anyhow!(detail));
-                        sleep(Duration::from_millis(250 * u64::from(attempt))).await;
+                        sleep(Duration::from_millis(backoff_ms)).await;
                         continue;
                     }
 

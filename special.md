@@ -3,7 +3,7 @@
 **goRkForge**  
 **Groks Self-Building, Self-Improving, Platform-Native Coding Agent**
 
-**Version:** 2.8 (Feb 28 2026) Tree-sitter Rust parsing fully enabled
+**Version:** 2.8 (Feb 28 2026) Auto-commit/push + tree-sitter parsing enabled
 **Canonical source of truth.**
 
 ## Vision (First Principles)
@@ -26,13 +26,15 @@ goRkForge is a Rust-native autonomous coding agent intended to scale from a loca
 
 - Full ReAct loop in `gorkforge-core`.
 - Grok API integration through `/v1/chat/completions`.
-- 11 built-in tools: `read_file`, `edit_file`, `run_cargo`, `git_status`, `git_commit`, `git_push`, `list_dir`, `grep`, `shell_safe`, `write_file`, `parse_rust_file`.
-- parse_rust_file tool added and verified
+- 13 built-in tools (including feature-branch + merge helpers): `read_file`, `edit_file`, `run_cargo`, `git_status`, `git_commit`, `git_push`, `git_create_feature_branch`, `git_merge_to_main`, `list_dir`, `grep`, `shell_safe`, `write_file`, `parse_rust_file`.
+- Auto-commit/push on edit/write + self-improve completion is enforced.
+- parse_rust_file tool added and verified.
+- Auto-commit/push + tree-sitter parsing enabled.
 
 ## Phase 2 (in progress, stabilization pass)
 
 - Parse `SELF_APPROVED: YES` and `PUSH_APPROVED: YES` directly from task prompts at run start.
-- Add LLM retry + timeout controls for xAI chat calls (`10s` timeout, up to `3` attempts).
+- Add LLM retry + timeout controls for xAI chat calls (`60s` timeout, up to `3` attempts).
 - Complete git workflow from overlay edits: auto commit/push after successful writes and on self-improve completion.
 - Harden push flow with branch protection and explicit approval checks.
 - Overlay sandbox in `.gorkforge/runs` with staged apply path and logging.
