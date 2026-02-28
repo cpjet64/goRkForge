@@ -3,15 +3,14 @@ name = "gorkforge-cli"
 version = "0.1.0"
 edition = "2021"
 
-[dependencies]
-anyhow = { workspace = true }
-clap = { workspace = true }
-async-trait = { workspace = true }
-tokio = { workspace = true }
-tracing = { workspace = true }
-tracing-subscriber = { workspace = true }
-gorkforge-core = { path = "../gorkforge-core" }
-
 [[bin]]
 name = "gorkforge"
 path = "src/main.rs"
+
+[dependencies]
+gorkforge-core = { path = "../gorkforge-core" }
+clap = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+anyhow = { workspace = true }

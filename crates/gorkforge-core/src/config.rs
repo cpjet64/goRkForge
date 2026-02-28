@@ -1,18 +1,20 @@
-use anyhow::{Context, Result};
+use anyhow::Result;
+use dotenvy::dotenv;
+use std::env;
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct Config {
     pub xai_api_key: String,
 }
 
 impl Config {
     pub fn load() -> Result<Self> {
-        let _ = dotenvy::dotenv();
+        let _ = dotenv(); // ignore if no .env
+        let key = env::var("xai_api_key")
+            .or_else(|_| env::var("XAI_API_KEY"))
+            .map_err(|_| anyhow::anyhow!("No xai_api_key found in .env or env vars"))?;
 
-        let xai_api_key = std::env::var("xai_api_key")
-            .or_else(|_| std::env::var("XAI_API_KEY"))
-            .context("missing xai_api_key or XAI_API_KEY in environment")?;
-
-        Ok(Self { xai_api_key })
+        tracing::info!(" API key loaded successfully (length: {})", key.len());
+        Ok(Config { xai_api_key: key })
     }
 }
