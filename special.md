@@ -1,12 +1,9 @@
-Tree-sitter Rust parsing tool added and verified in v2.8
- - Auto-commit and push pipeline verified in v2.8
-
 # special.md
 
 **goRkForge**  
 **Groks Self-Building, Self-Improving, Platform-Native Coding Agent**
 
-**Version:** 2.9 (Feb 28 2026) Speed optimizations: fast gates + trimmed context + precomputed tools
+**Version:** 2.10 (Feb 28 2026) Stable self-editing pipeline + Rust 2024/1.93 + tree-sitter parsing
 **Canonical source of truth.**
 
 ## Vision (First Principles)
@@ -35,6 +32,9 @@ goRkForge is a Rust-native autonomous coding agent intended to scale from a loca
 - LLM context is trimmed by default (`special.md`, `Cargo.toml`, and key source files); full context requires `GORKFORGE_CONTEXT_FULL=YES`.
 - parse_rust_file tool added and verified.
 - Auto-commit/push + tree-sitter parsing enabled.
+- Auto-commit and push pipeline verified after edit/write operations.
+- Workspace upgraded to Rust 2024 edition and `rust-version = "1.93"` across crates.
+- Reliability smoke test line from direct self-edit run
 
 ## Phase 2 (in progress, stabilization pass)
 

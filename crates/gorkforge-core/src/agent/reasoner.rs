@@ -22,10 +22,14 @@ impl ReActReasoner {
 
     pub async fn run_task(&mut self, context: &TaskContext) -> Result<TaskResult> {
         let task_flags = context.task.to_ascii_lowercase();
+        let normalized_task = task_flags
+            .chars()
+            .filter(|c| !c.is_ascii_whitespace())
+            .collect::<String>();
         self.toolset.core_self_approved =
-            self.toolset.core_self_approved || task_flags.contains("self_approved: yes");
+            self.toolset.core_self_approved || normalized_task.contains("self_approved:yes");
         self.toolset.push_self_approved =
-            self.toolset.push_self_approved || task_flags.contains("push_approved: yes");
+            self.toolset.push_self_approved || normalized_task.contains("push_approved:yes");
 
         let requires_tooling = task_flags.contains("add")
             || task_flags.contains("create")
@@ -34,7 +38,17 @@ impl ReActReasoner {
             || task_flags.contains("append")
             || task_flags.contains("tree-sitter")
             || task_flags.contains("parse_rust_file");
-
+        let requires_mutation = task_flags.contains("add")
+            || task_flags.contains("create")
+            || task_flags.contains("edit")
+            || task_flags.contains("update")
+            || task_flags.contains("append")
+            || (task_flags.contains("tree-sitter")
+                && task_flags.contains("file")
+                && task_flags.contains("add"));
+        let mut used_mutating_tool = false;
+        let mut seen_tool_use = false;
+        let mut tooling_reminder_emitted = false;
         let tool_specs = self
             .toolset
             .tool_specs()
@@ -63,10 +77,30 @@ impl ReActReasoner {
 
             let has_content = turn.content.as_ref().is_some_and(|c| !c.trim().is_empty());
             if turn.tool_calls.is_empty() {
-                if requires_tooling {
+                if requires_tooling && !seen_tool_use {
+                    if !tooling_reminder_emitted {
+                        messages.push(LlmMessage {
+                            role: "assistant".to_string(),
+                            content:
+                                "TASK REQUIRES TOOL USE: you must emit at least one valid tool call before completion text."
+                                    .to_string(),
+                            tool_call_id: None,
+                        });
+                        tooling_reminder_emitted = true;
+                        continue;
+                    }
+
                     return Ok(TaskResult {
                         status: TaskStatus::Failed,
                         output: "completion blocked: task requires tool usage".to_string(),
+                    });
+                }
+
+                if requires_mutation && !used_mutating_tool {
+                    return Ok(TaskResult {
+                        status: TaskStatus::Failed,
+                        output: "completion blocked: task requires mutating tool usage (edit_file or write_file)"
+                            .to_string(),
                     });
                 }
 
@@ -113,6 +147,10 @@ impl ReActReasoner {
             }
 
             for call in turn.tool_calls {
+                if matches!(call.name.as_str(), "edit_file" | "write_file") {
+                    used_mutating_tool = true;
+                }
+                seen_tool_use = true;
                 let result = self
                     .toolset
                     .execute(&call.name, &call.arguments, context)
@@ -159,12 +197,16 @@ impl ReActReasoner {
 
         Ok(TaskResult {
             status: TaskStatus::Failed,
-            output: match last_tool_error {
-                Some(err) => format!(
+            output: match (requires_mutation && !used_mutating_tool, last_tool_error) {
+                (true, _) => {
+                    "max iterations reached: task required mutating tool usage but none was used"
+                        .to_string()
+                }
+                (_, Some(err)) => format!(
                     "max iterations reached: {} (last tool error: {err})",
                     self.max_iter
                 ),
-                None => format!("max iterations reached: {}", self.max_iter),
+                (_, None) => format!("max iterations reached: {}", self.max_iter),
             },
         })
     }
@@ -201,14 +243,14 @@ impl ReActReasoner {
                 return Ok(result);
             }
 
-            if let Err(err) = self.toolset.auto_commit_and_push("self-improve completed") {
-                return Ok(TaskResult {
-                    status: TaskStatus::Failed,
-                    output: format!("auto commit/push failed after completion: {}", err),
-                });
-            }
-
             if Self::self_improve_format_ok(&result.output) {
+                if let Err(err) = self.toolset.auto_commit_and_push("self-improve completed") {
+                    return Ok(TaskResult {
+                        status: TaskStatus::Failed,
+                        output: format!("auto commit/push failed after completion: {}", err),
+                    });
+                }
+
                 return Ok(result);
             }
 
