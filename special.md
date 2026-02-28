@@ -3,7 +3,7 @@
 **goRkForge**  
 **Groks Self-Building, Self-Improving, Platform-Native Coding Agent**
 
-**Version:** 2.8 (Feb 28 2026)  Flag detection, LLM timeout/retry, and auto-commit/push hardening
+**Version:** 2.8 (Feb 28 2026) Tree-sitter Rust parsing fully enabled
 **Canonical source of truth.**
 
 ## Vision (First Principles)

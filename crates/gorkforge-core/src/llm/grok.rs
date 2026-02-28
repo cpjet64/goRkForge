@@ -46,7 +46,7 @@ impl GrokClient {
         let timeout = std::env::var("GORKFORGE_LLM_TIMEOUT_SECONDS")
             .ok()
             .and_then(|value| value.parse::<u64>().ok())
-            .unwrap_or(10);
+            .unwrap_or(30);
 
         let max_retries = std::env::var("GORKFORGE_LLM_MAX_RETRIES")
             .ok()

@@ -26,6 +26,20 @@ impl ReActReasoner {
             self.toolset.core_self_approved || task_flags.contains("SELF_APPROVED: YES");
         self.toolset.push_self_approved =
             self.toolset.push_self_approved || task_flags.contains("PUSH_APPROVED: YES");
+        let task_lower = context.task.to_ascii_lowercase();
+        let requires_tooling = task_lower.contains(" add ")
+            || task_lower.contains(" create ")
+            || task_lower.contains(" edit ")
+            || task_lower.contains(" write ")
+            || task_lower.contains(" update ")
+            || task_lower.contains(" append ")
+            || task_lower.contains("register ")
+            || task_lower.contains("run_cargo")
+            || task_lower.contains("auto-commit")
+            || task_lower.contains("auto push")
+            || task_lower.contains("parse_rust_file")
+            || task_lower.contains("special.md")
+            || task_lower.contains("phase 1");
 
         let system_prompt = self.system_prompt(context);
         let mut messages = vec![LlmMessage {
@@ -56,6 +70,13 @@ impl ReActReasoner {
 
             let has_content = turn.content.as_ref().is_some_and(|c| !c.trim().is_empty());
             if turn.tool_calls.is_empty() {
+                if requires_tooling {
+                    return Ok(TaskResult {
+                        status: TaskStatus::Failed,
+                        output: "completion blocked: requested task requires tool usage, but no tool calls were made".to_string(),
+                    });
+                }
+
                 if has_content {
                     return Ok(TaskResult {
                         status: TaskStatus::Completed,
@@ -216,7 +237,9 @@ impl ReActReasoner {
         );
         prompt.push_str("Work only inside the repository.\n");
         prompt.push_str("Use tools in Plan/Execute/Verify/Reflect loops.\n");
-        prompt.push_str("Return PLAN and PATCH text for requested edits.\n");
+        prompt.push_str(
+            "Return PLAN and PATCH text for requested edits, but do not claim work is done without tool calls.\n",
+        );
 
         if let Some(policy_file) = &context.policy_file {
             prompt.push_str(&format!("Policy file: {}\n", policy_file));
