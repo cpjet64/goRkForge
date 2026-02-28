@@ -192,7 +192,7 @@ impl ToolSet {
             ),
             (
                 "run_cargo".to_string(),
-                "Run cargo gates in overlay dir (fmt --check, clippy -- -D warnings, test, build).".to_string(),
+                "Run cargo gates in overlay dir. Fast mode: fmt --check + check. Full mode: clippy -- -D warnings, test, build. Controlled by GORKFORGE_GATES_MODE.".to_string(),
                 serde_json::json!({"type":"object","properties":{},"additionalProperties":false}),
             ),
             (
