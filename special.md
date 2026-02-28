@@ -1,4 +1,7 @@
-Tree-sitter Rust parsing tool added and verified in v2.8&#10;&#10;# special.md
+Tree-sitter Rust parsing tool added and verified in v2.8
+ - Auto-commit and push pipeline verified in v2.8
+
+# special.md
 
 **goRkForge**  
 **Groks Self-Building, Self-Improving, Platform-Native Coding Agent**
