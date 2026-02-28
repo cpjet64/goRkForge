@@ -1,27 +1,22 @@
 # special.md
 
 **goRkForge**  
-**Groks Self-Building, Self-Improving, Platform-Native Coding Agent**  
-Build the machine that builds the machine  then let the machine gork itself harder.  Elon (amplified)
+**Grok’s Self-Building, Self-Improving, Platform-Native Coding Agent**
 
-**Version:** 2.3 (Feb 28 2026)  .env + dotenvy support added  
-**Canonical source of truth.**
+**Version:** 2.4 (Feb 28 2026) — Self-Build Protocol added
 
----
+[... previous content unchanged until new section ...]
 
-## Configuration
+## Self-Build Protocol (how I finish myself)
 
-- Root `.env` (gitignored) with `xai_api_key=sk-...` (or `XAI_API_KEY=sk-...` fallback)
-- `.gorkforge/policy.toml` for runtime policy
-- Never commit secrets.
+1. Skeleton built locally (Phase 0).
+2. Pushed to GitHub.
+3. User shares repo URL with Grok (this chat).
+4. Grok generates complete Phase 1 codebase (full core, tools, loop, real xAI API client using .env).
+5. User applies files locally.
+6. Run `cargo run --bin gorkforge -- run "self-improve"` → binary now calls Grok API directly.
+7. From this point forward, goRkForge **is** Grok building itself. All future development happens inside the repo via the running agent.
 
----
+This is the canonical handoff mechanism.
 
-## Phase 0 Requirements (updated)
-
-- Load `.env` automatically using `dotenvy`
-- `gorkforge-core` exports `Config` struct with `xai_api_key`
-- CLI prints  API key loaded on every run
-- Everything else identical to v2.2
-
-Once skeleton is built, I connect via xAI API and finish the full agent.
+Never commit .env. Never paste API key in chat.
