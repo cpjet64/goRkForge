@@ -256,7 +256,8 @@ impl ToolSet {
             ),
             (
                 "create_issue".to_string(),
-                "Create a GitHub issue for deferred/future work using gh. Requires PUSH_APPROVED=YES. Args: {title, body?, labels?, assignees?}.".to_string(),
+                "Create a GitHub issue for deferred/future work using gh. Requires PUSH_APPROVED=YES. Args: {title, body?, labels?, assignees?}. Body defaults to a non-empty placeholder when omitted."
+                    .to_string(),
                 serde_json::json!({
                     "type":"object",
                     "properties":{
@@ -741,12 +742,15 @@ impl ToolSet {
             return Err(anyhow!("open_pull_request: title cannot be empty"));
         }
 
-        let body = args
+        let mut body = args
             .get("body")
             .and_then(|v| v.as_str())
-            .unwrap_or("")
+            .unwrap_or("Created by goRkForge.")
             .trim()
             .to_string();
+        if body.is_empty() {
+            body = "Created by goRkForge.".to_string();
+        }
 
         let base = args
             .get("base")
