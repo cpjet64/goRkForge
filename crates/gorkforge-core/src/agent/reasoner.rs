@@ -49,18 +49,21 @@ impl ReActReasoner {
             || (task_flags.contains("tree-sitter")
                 && task_flags.contains("file")
                 && task_flags.contains("add"));
-        let requires_issue_review = !referenced_issue_numbers.is_empty()
-            || task_flags.contains("review issue")
-            || task_flags.contains("review issues")
-            || task_flags.contains("triage issue")
-            || task_flags.contains("issue triage")
-            || task_flags.contains("github issue")
-            || task_flags.contains("github issues")
-            || task_flags.contains("read_github_issue")
-            || task_flags.contains("list_github_issues")
-            || task_flags.contains("pull request")
-            || task_flags.contains("open_pull_request")
-            || !referenced_issue_numbers.is_empty();
+        let is_issue_creation = normalized_task.contains("createissue")
+            || normalized_task.contains("creategithubissue");
+
+        let requires_issue_review = !is_issue_creation
+            && (!referenced_issue_numbers.is_empty()
+                || task_flags.contains("review issue")
+                || task_flags.contains("review issues")
+                || task_flags.contains("triage issue")
+                || task_flags.contains("issue triage")
+                || task_flags.contains("github issue")
+                || task_flags.contains("github issues")
+                || task_flags.contains("read_github_issue")
+                || task_flags.contains("list_github_issues")
+                || task_flags.contains("pull request")
+                || task_flags.contains("open_pull_request"));
         let requires_issue_listing = task_flags.contains("list issue")
             || task_flags.contains("review issue")
             || task_flags.contains("review issues")
