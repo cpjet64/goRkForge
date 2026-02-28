@@ -49,10 +49,15 @@ impl ReActReasoner {
             || (task_flags.contains("tree-sitter")
                 && task_flags.contains("file")
                 && task_flags.contains("add"));
-        let requires_issue_review = task_flags.contains("issue")
-            || task_flags.contains("issues")
+        let requires_issue_review = !referenced_issue_numbers.is_empty()
+            || task_flags.contains("review issue")
+            || task_flags.contains("review issues")
+            || task_flags.contains("triage issue")
+            || task_flags.contains("issue triage")
             || task_flags.contains("github issue")
             || task_flags.contains("github issues")
+            || task_flags.contains("read_github_issue")
+            || task_flags.contains("list_github_issues")
             || task_flags.contains("pull request")
             || task_flags.contains("open_pull_request")
             || !referenced_issue_numbers.is_empty();
@@ -61,7 +66,8 @@ impl ReActReasoner {
             || task_flags.contains("review issues")
             || task_flags.contains("triage issue")
             || task_flags.contains("issue triage");
-        let requires_linked_pr = requires_mutation || task_flags.contains("pull request");
+        let requires_linked_pr =
+            task_flags.contains("pull request") || task_flags.contains("open_pull_request");
         let mut used_mutating_tool = false;
         let mut seen_tool_use = false;
         let mut tooling_reminder_emitted = false;
@@ -159,7 +165,10 @@ impl ReActReasoner {
                         });
                     }
 
-                    if linked_pr_called && linked_issue_numbers.is_empty() {
+                    if linked_pr_called
+                        && !referenced_issue_numbers.is_empty()
+                        && linked_issue_numbers.is_empty()
+                    {
                         return Ok(TaskResult {
                             status: TaskStatus::Failed,
                             output:
@@ -250,6 +259,7 @@ impl ReActReasoner {
                     }
                     "open_pull_request" => {
                         linked_pr_called = true;
+                        let mut inserted = false;
                         if let Some(list) = call
                             .arguments
                             .get("issue_numbers")
@@ -258,7 +268,13 @@ impl ReActReasoner {
                             for n in list {
                                 if let Some(issue) = n.as_u64() {
                                     linked_issue_numbers.insert(issue);
+                                    inserted = true;
                                 }
+                            }
+                        }
+                        if !inserted {
+                            for issue in &read_issue_numbers {
+                                linked_issue_numbers.insert(*issue);
                             }
                         }
                     }
