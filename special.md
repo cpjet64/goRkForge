@@ -3,7 +3,7 @@
 **goRkForge**  
 **Groks Self-Building, Self-Improving, Platform-Native Coding Agent**
 
-**Version:** 2.6 (Mar 1 2026)  Full workspace overlay sync + Phase 1 ReAct live
+**Version:** 2.7 (Feb 28 2026)  Noisy output cleanup + Phase 2 readiness
 **Canonical source of truth.**
 
 ## Vision (First Principles)
@@ -29,6 +29,16 @@ goRkForge is a Rust-native autonomous coding agent intended to scale from a loca
 - 9 built-in tools: `read_file`, `edit_file`, `run_cargo`, `git_status`, `git_commit`, `list_dir`, `grep`, `shell_safe`, `write_file`.
 - Overlay sandbox in `.gorkforge/runs` with staged apply path and logging.
 - Local run gates after edits (`cargo fmt --check`, `cargo clippy -- -D warnings`, `cargo test`, `cargo build`).
+
+## Phase 2 Outline (planned)
+
+- Finish noisy output hardening by removing duplicate user-facing `println!` echoes from API/bootstrap startup paths and keeping structured logs only.
+- Expand policy-backed operator checks for install/reinstall and CLI run lifecycle.
+- Complete cleanup verification via full repo gate execution after every self-improve cycle.
+
+### Cleanup Note
+
+- `crates/gorkforge-core/src/config.rs` no longer emits duplicate `println!` output for API key/model loading; all startup state is now logged through `tracing::info!`.
 
 ## Security Rules
 

@@ -33,9 +33,7 @@ impl Config {
         });
 
         tracing::info!(" API key loaded successfully (length: {})", key.len());
-        println!(" API key loaded successfully (length: {})", key.len());
         tracing::info!(" LLM model configured: {}", model);
-        println!(" LLM model configured: {}", model);
 
         Ok(Config {
             xai_api_key: key,
